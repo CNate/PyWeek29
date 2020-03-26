@@ -1,8 +1,8 @@
+import os
 import pygame as _
 from pygame.constants import *
 
 #Constants
-BACKGROUND_FILENAME = "back_cave_3"
 FPS = 60
 
 
@@ -11,21 +11,43 @@ FPS = 60
 
 def setDisplay():
     screenInfo = _.display.Info()
-    
     return _.display.set_mode((screenInfo.current_w//3, screenInfo.current_h - 100))
 
 
-def processEvents(state):
-    event = _.event.poll()
-    if event.type == _.NOEVENT:
+def processEvents(state, inputDirections):
+    for e in _.event.get():
+        if e.type == _.NOEVENT:
+            return
+
+        if e.type == _.KEYDOWN:
+            processKeyEvent(e.key, state, inputDirections)
+
+        if e.type == _.KEYUP:
+            processKeyEvent(e.key, state, inputDirections, False)
+
+        if e.type == _.QUIT:
+            state['AppIsRunning'] = False
+
+
+def processKeyEvent(keycode, state, inputDirections, isKeyDown = True):
+    if (keycode == _.K_ESCAPE):
+        state['AppIsRunning'] = False
         return
 
-    if event.type == _.QUIT:
-        state['AppIsRunning'] = False
+    if keycode == _.K_UP:
+        inputDirections["up"] = isKeyDown
+    if keycode == _.K_DOWN:
+        inputDirections["down"] = isKeyDown
+    if keycode == _.K_LEFT:
+        inputDirections["left"] = isKeyDown
+    if keycode == _.K_RIGHT:
+        inputDirections["right"] = isKeyDown
+    if keycode == _.K_SPACE and isKeyDown:
+        print("PEW PEW")
 
 #TODO:Util module
 def loadImageExt(name):
-    return _.image.load(f"./images/{name}.png").convert()
+    return _.image.load(f"./images/{name}.png").convert_alpha()
 
 
 #TODO:Util module
@@ -35,79 +57,95 @@ def getDisplayCenter():
 
 
 def moveBackground(delta_time, screen, array):
-    # These are just simple bg things, so not a big deal
-    # but a good technique is to have things be objects
-    # and then give them an _update() method that defines
-    # their behaviors (which you then call every frame)
-    
-    # most people call these guys 'actors', which is fine
-    # I just call them 'sprites', which is less accurate
-    # but also fine, because I say so
-        
     for bg in array:
-        # always try to use delta_time
         bg.y += bg.speed * delta_time
         bg.rect.y = int(bg.y)
         if (bg.rect.y >= 2000):
-            bg.rect.y = y - 2000
+            y = getDisplayCenter()[1]
+            bg.y = y - 2000
+            bg.rect.y = int(bg.y)
         screen.blit(bg.image, bg.rect)
 
+
 def initBackground(screen, x, y, x_offset=0, y_offset=0):
-    bg1 = BackgroundLayer(BACKGROUND_FILENAME, x + x_offset, y + y_offset, .1)
-    bg2 = BackgroundLayer(BACKGROUND_FILENAME, x + x_offset, y-2000 + y_offset, .1)
-    
+    bg1 = BackgroundLayer(x + x_offset, y + y_offset)
+    bg2 = BackgroundLayer(x + x_offset, y-2000 + y_offset)
+
     # adjust for the large image..
-    CENTER_X = getDisplayCenter()[0]
-    bg1.x = CENTER_X - (bg1.rect.width/2)
-    bg2.x = CENTER_X - (bg2.rect.width/2)
-    
-    # implicit conversion is being deprecated (I know
-    # it's for the best, but I don't like it!)
-    # And pygame rects use ints, so we have
-    # to store the real x/y values separately
-   
+    center_x = getDisplayCenter()[0]
+    bg1.x = center_x - (bg1.rect.width/2)
+    bg2.x = center_x - (bg2.rect.width/2)
+
     bg1.rect.x = int(bg1.x)
     bg2.rect.x = int(bg2.x)
-    
+
     return [bg1, bg2]
 
+
 class BackgroundLayer(_.sprite.Sprite):
-    def __init__(self, image, x, y, speed):
+    background_filename = "back_cave_3"
+    def __init__(self, x, y, speed = .1):
         super().__init__()
         
-        self.image = _.transform.rotate(loadImageExt(image), 90)
+        self.image = _.transform.rotate(loadImageExt(self.background_filename), 90)
         self.x, self.y = x, y
         self.rect = self.image.get_rect()
         
         self.speed = speed
-        
 
+
+class Player(_.sprite.Sprite):
+    player_image_filename = "Spaceship004"
+    def __init__(self, speed = .5):
+        super().__init__()
+
+        self.image = loadImageExt(self.player_image_filename)
+        center_x, center_y = getDisplayCenter()
+        self.rect = self.image.get_rect()
+        self.x, self.y = center_x, center_y * 2 - 10
+        self.rect.x, self.rect.y = center_x, center_y * 2 - 50
+
+        self.speed = speed
+
+    def update(self, screen, delta_time, inputDirections):
+        if inputDirections["right"]:
+            self.rect.x += int(delta_time * self.speed)
+        if inputDirections["left"]:
+            self.rect.x -= int(delta_time * self.speed)
+        if inputDirections["up"]:
+            self.rect.y -= int(delta_time * self.speed)
+        if inputDirections["down"]:
+            self.rect.y += int(delta_time * self.speed)
+        screen.blit(self.image, self.rect)
 
 def main():
     _.init()
     if not _.display.get_init():
         print("Display failed to initialized")
         return
-    
-    CENTER_X, CENTER_Y = getDisplayCenter()
-    screen = setDisplay()
-    
-    backgroundArray = initBackground(screen, 0, 0)
+
+    os.environ['SDL_VIDEO_CENTERED'] = '1' 
+    SCREEN = setDisplay()
+    backgroundArray = initBackground(SCREEN, 0, 0)
+    player = Player()
 
     state = {'AppIsRunning': True}
-    
-    # define the FPS clock outside the loop..
+    inputDirections = {
+        "up": False,
+        "down": False,
+        "left": False,
+        "right": False
+    }
+
     fpsClock = _.time.Clock()
-    
     while(state['AppIsRunning']):
-        # ..then call it at the head of your loop
-        # this lets it pause until the next frame
-        # 'should' be run..
         delta_time = fpsClock.tick(FPS)
-        
-        moveBackground(delta_time, screen, backgroundArray)
-        processEvents(state)
+        processEvents(state, inputDirections)
+        moveBackground(delta_time, SCREEN, backgroundArray)
+        player.update(SCREEN, delta_time, inputDirections)
 
         _.display.update()
+
+
 if __name__ == "__main__":
     main()
