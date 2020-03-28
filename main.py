@@ -186,6 +186,7 @@ def main():
         delta_time = fpsClock.tick(FPS)
         processEvents(state, inputs)
         if not state["IsPaused"]:
+            SCREEN.fill((0, 0, 0))
             moveBackground(delta_time, backgroundArray)
             player.update(delta_time, inputs)
 
