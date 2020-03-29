@@ -8,8 +8,11 @@ PyGame 1.9.6
 CONTROLS:
 
 Arrow keys: Move
+
 Space: Fire
+
 Butterfly Effect: Z
+
 Escape: Pause
 
 RUN:
