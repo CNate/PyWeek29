@@ -1,10 +1,30 @@
 import os
+import random
 import pygame as _
 from pygame.constants import *
 
 # Constants
 FPS = 60
+COLORS = {
+    "white": (255, 255, 255)
+}
 
+
+STATE = {
+    "AppIsRunning": True,
+    "IsPaused": False,
+    "IsGameOver": False,
+}
+
+INPUTS = {
+    "up": False,
+    "down": False,
+    "left": False,
+    "right": False,
+    "fire": False,
+    "super": False,
+    "reset": False,
+}
 
 # insert LEVEL class here; bg (scroll) speed should be a property of this
 
@@ -44,6 +64,10 @@ def processKeyEvent(keycode, state, inputs, isKeyDown=True):
         inputs["right"] = isKeyDown
     if keycode == _.K_SPACE:
         inputs["fire"] = isKeyDown
+    if keycode == _.K_z:
+        inputs["super"] = isKeyDown
+    if keycode == _.K_r:
+        inputs["reset"] = isKeyDown
 
 
 # TODO:Util module
@@ -61,6 +85,11 @@ def scaleImage(surface, multiplier):
 def getDisplayCenter():
     di = _.display.Info()
     return (di.current_w//2, di.current_h//2)
+
+
+def renderBackground(array):
+    for bg in array:
+        bg.screen.blit(bg.image, bg.rect)
 
 
 def moveBackground(delta_time, array):
@@ -107,6 +136,12 @@ class Player(_.sprite.Sprite):
     filename = "butterfly_01"
     bullets = []
     powerup_count = 0
+    fire_cooldown_max = 275
+    powerup_max = 4
+    life_count = 3
+    is_invulnerable = False
+    invulnerable_cooldown = 0
+    invulnerable_cooldown_max = 500
 
     def __init__(self, screen, speed=.5):
         super().__init__()
@@ -120,12 +155,15 @@ class Player(_.sprite.Sprite):
         self.speed = speed
         self.screen = screen
         self.fire_cooldown = 0
+        self.life_count = 3
         self.screen_w = screen.get_width()
         self.screen_h = screen.get_height()
+        self.bullet_sound = _.mixer.Sound("./audio/bullet.wav")
 
-    def update(self, delta_time, inputs):
+    def update(self, delta_time, inputs, enemies):
         center_x = self.rect.x + int(self.rect.w/2)
         center_y = self.rect.y + int(self.rect.h/2)
+
         if center_x < self.screen_w and inputs["right"]:
             self.rect.x += self.calculateSpeed(delta_time)
         if center_x > 0 and inputs["left"]:
@@ -135,32 +173,69 @@ class Player(_.sprite.Sprite):
         if center_y < self.screen_h and inputs["down"]:
             self.rect.y += self.calculateSpeed(delta_time)
         if self.fire_cooldown < 0 and inputs["fire"] and len(self.bullets) < 4:
-            self.fire_cooldown = 275
-            self.powerup_count += 1
+            self.fire_cooldown = self.fire_cooldown_max
             self.bullets.append(Bullet(self.screen, self.rect.x, self.rect.y))
+            self.bullet_sound.play()
+        if inputs["super"] and self.powerup_count == self.powerup_max:
+            self.powerup_count = 0
+            self.bullets.append(Bullet(self.screen,
+                                       self.rect.x,
+                                       self.rect.y,
+                                       speed=1,
+                                       scale_multiplier=self.powerup_max))
+            self.bullet_sound.play()
 
+        self.handleEnemyCollisions(enemies)
         self.fire_cooldown -= delta_time
+        self.invulnerable_cooldown -= delta_time
+        if self.invulnerable_cooldown < 0:
+            self.is_invulnerable = False
         self.screen.blit(self.image, self.rect)
-        self.updateBullets(delta_time)
+        self.updateBullets(delta_time, enemies)
 
     def calculateSpeed(self, dt):
         return int(dt * self.speed)
 
-    def updateBullets(self, dt):
+    def updateBullets(self, dt, enemies):
         for b in self.bullets:
-            if b.rect.y < -50:
+            y = -50 if not b.is_super else -200
+            if b.rect.y < y:
                 self.bullets.remove(b)
                 continue
+
+            is_hit = False
+            for e in enemies:
+                if b.is_super:
+                    continue
+                if _.sprite.collide_rect(b, e):
+                    is_hit = True
+                    break
+
+            if is_hit:
+                self.bullets.remove(b)
+                if self.powerup_count < self.powerup_max:
+                    self.powerup_count += 1
+                continue
+
             b.update(dt)
+
+    def handleEnemyCollisions(self, enemies):
+        for e in enemies:
+            if not self.is_invulnerable and _.sprite.collide_rect(self, e):
+                self.is_invulnerable = True
+                self.invulnerable_cooldown = self.invulnerable_cooldown_max
+                self.life_count -= 1
 
 
 class Bullet(_.sprite.Sprite):
     filename = "bullet"
 
-    def __init__(self, screen, x, y, speed=.5):
+    def __init__(self, screen, x, y, speed=.5, scale_multiplier=1):
         super().__init__()
 
-        self.image = scaleImage(loadImageExt(self.filename), 3.5)
+        self.is_super = scale_multiplier > 1
+        self.image = scaleImage(loadImageExt(self.filename),
+                                (scale_multiplier * 3.5))
         self.rect = self.image.get_rect()
         self.rect.x, self.rect.y = x, y
         self.screen = screen
@@ -178,20 +253,22 @@ class Bullet(_.sprite.Sprite):
 
 class PowerUp(_.sprite.Sprite):
     filename = "powerup"
+    cooldown_max = 100
 
     def __init__(self, screen, x, y):
+        super().__init__()
+
         self.original_image = scaleImage(loadImageExt(self.filename), 2)
-        self.image = self.original_image
-        self.rect = self.image.get_rect()
-        self.rect.x, self.rect.y = x, y
+        self.rect = self.original_image.get_rect()
+        self.rect.topleft = x, y
         self.screen = screen
         self.animation_cooldown = 0
         self.angle = 0
 
     def update(self, dt):
         if self.animation_cooldown <= 0:
-            self.animation_cooldown = 100
-            self.angle += 45 % 360
+            self.animation_cooldown = self.cooldown_max
+            self.angle += 45
             self.image = _.transform.rotate(self.original_image, self.angle)
             x, y = self.rect.center
             self.rect = self.image.get_rect()
@@ -203,22 +280,165 @@ class PowerUp(_.sprite.Sprite):
 
 class UI():
     powerups = []
-    score = 0
+    score = 200
+    score_len_max = 9
+    score_text = ""
     powerup_x, powerup_y = 20, 20
+    lives = []
 
     def __init__(self, screen):
         self.screen = screen
+        self.font = _.font.Font(None, 40)
 
-    def update(self, dt, count):
-        if len(self.powerups) < count:
+    def update(self, dt, charge_count, life_count):
+        if len(self.powerups) < charge_count:
             self.powerups.append(PowerUp(self.screen,
-                                 self.powerup_x * count,
+                                 self.powerup_x * charge_count,
                                  self.powerup_y))
+        elif(charge_count == 0):
+            self.powerups.clear()
+
         self.renderPowerups(dt)
+        self.renderScore()
+        self.renderLives(life_count)
 
     def renderPowerups(self, dt):
         for pu in self.powerups:
             pu.update(dt)
+
+    def renderLives(self, life_count):
+        if life_count < 0:
+            return
+
+        while len(self.lives) < life_count:
+            self.lives.append(Life(self.screen,
+                                   self.powerup_y,
+                                   len(self.lives) + 1))
+        while len(self.lives) > life_count:
+            self.lives.remove(self.lives[len(self.lives) - 1])
+        for l in self.lives:
+            l.update()
+
+    def renderScore(self):
+        # TODO: optimize displaying score
+        self.score_text = ""
+        score_str = str(self.score)
+        for x in range(self.score_len_max - len(score_str)):
+            self.score_text += "0"
+        self.score_text = f"{self.score_text}{score_str}"
+        score = self.font.render(self.score_text, False, COLORS["white"])
+        score_rect = score.get_rect()
+        score_rect.topleft = (self.screen.get_width() - score_rect.width - 10,
+                              self.powerup_y)
+        self.screen.blit(score, score_rect)
+
+
+class Life(_.sprite.Sprite):
+    filename = "butterfly_01"
+
+    def __init__(self, screen, y, count):
+        super().__init__()
+
+        self.screen = screen
+        self.image = scaleImage(loadImageExt(self.filename), 2)
+        self.rect = self.image.get_rect()
+        center = screen.get_width()//2
+        if count == 3:
+            self.rect.topleft = center + 50, y
+        elif count == 2:
+            self.rect.topleft = center, y
+        elif count == 1:
+            self.rect.topleft = center - 50, y
+
+    def update(self):
+        self.screen.blit(self.image, self.rect)
+
+
+class Enemy(_.sprite.Sprite):
+    def __init__(self, screen, speed, filename):
+        super().__init__()
+
+        self.screen = screen
+        self.speed = speed
+        self.image = scaleImage(loadImageExt(self.filename), 2)
+        self.rect = self.image.get_rect()
+        self.rect.center = (random.randint(0, screen.get_width()),
+                            random.randint(-200, -10))
+
+    def update(self, dt):
+        self.rect.center = (self.rect.centerx,
+                            (self.rect.centery + int(self.speed * dt)))
+        self.screen.blit(self.image, self.rect)
+
+
+class Sun(Enemy):
+    filename = "sun"
+
+    def __init__(self, screen):
+        super().__init__(screen, .5, self.filename)
+
+
+class Toilet(Enemy):
+    filename = "toilet"
+
+    def __init__(self, screen):
+        super().__init__(screen, .5, self.filename)
+
+
+class EnemyEngine():
+    enemy_max = 10
+    enemies = []
+    spawn_cooldown = 0
+    cooldown_max = 1000
+
+    def __init__(self, screen):
+        self.screen = screen
+        self.update_timer = 0
+
+    def update(self, dt, bullets, ui):
+        self.update_timer += dt
+        if self.update_timer > 30000:
+            self.update_timer = 0
+            self.enemy_max += 10
+        while(len(self.enemies) < self.enemy_max and self.spawn_cooldown < 0):
+            if self.enemy_max == len(self.enemies) + 1:
+                self.spawn_cooldown = self.cooldown_max
+
+            enemy = Sun(self.screen) if random.randint(0, 1) == 0 else Toilet(self.screen)
+            self.enemies.append(enemy)
+
+        self.spawn_cooldown -= dt
+        for e in self.enemies:
+            if e.rect.y > self.screen.get_height() + 100:
+                self.enemies.remove(e)
+                continue
+
+            is_shot = False
+            for b in bullets:
+                if _.sprite.collide_rect(b, e):
+                    is_shot = True
+
+            if is_shot:
+                self.enemies.remove(e)
+                ui.score += 10
+                continue
+
+            e.update(dt)
+
+
+class GameOver():
+    def __init__(self, screen):
+        self.screen = screen
+        self.font = _.font.Font(None, 40)
+        self.game_over = self.font.render("GAME OVER!!!", False, COLORS["white"])
+        self.rect = self.game_over.get_rect()
+        self.rect.x, self.rect.y = screen.get_width()//2 - 100, -100
+
+    def update(self, speed, dt):
+        # TODO: Reset functionality
+        if self.screen.get_height()//2 > self.rect.y:
+            self.rect.y += int(dt * speed)
+        self.screen.blit(self.game_over, self.rect)
 
 
 def main():
@@ -232,29 +452,31 @@ def main():
     backgroundArray = initBackground(SCREEN, 0, 0)
     player = Player(SCREEN)
     ui = UI(SCREEN)
-
-    state = {
-        "AppIsRunning": True,
-        "IsPaused": False,
-    }
-
-    inputs = {
-        "up": False,
-        "down": False,
-        "left": False,
-        "right": False,
-        "fire": False,
-    }
-
+    ee = EnemyEngine(SCREEN)
+    go = GameOver(SCREEN)
+    _.mixer.music.load("./audio/song.mp3")
+    _.mixer.music.play()
     fpsClock = _.time.Clock()
-    while(state['AppIsRunning']):
+    while(STATE['AppIsRunning']):
         delta_time = fpsClock.tick(FPS)
-        processEvents(state, inputs)
-        if not state["IsPaused"]:
+        processEvents(STATE, INPUTS)
+
+        if STATE["IsGameOver"] and INPUTS["reset"]:
+            STATE["IsGameOver"] = False
+
+        STATE["IsGameOver"] = player.life_count == 0
+        if STATE["IsGameOver"]:
+            SCREEN.fill((0, 0, 0))
+            renderBackground(backgroundArray)
+            go.update(.25, delta_time)
+            ui.update(delta_time, player.powerup_count, player.life_count)
+
+        if not STATE["IsPaused"] and not STATE["IsGameOver"]:
             SCREEN.fill((0, 0, 0))
             moveBackground(delta_time, backgroundArray)
-            player.update(delta_time, inputs)
-            ui.update(delta_time, player.powerup_count)
+            player.update(delta_time, INPUTS, ee.enemies)
+            ee.update(delta_time, player.bullets, ui)
+            ui.update(delta_time, player.powerup_count, player.life_count)
 
         _.display.update()
 
