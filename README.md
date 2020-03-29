@@ -1,22 +1,28 @@
 # PyWeek29
 Theme: The butterfly Effect
 
-DEPENDENCIES: PyGame 1.9.6
+DEPENDENCIES:
+
+PyGame 1.9.6
 
 CONTROLS:
+
 Arrow keys: Move
 Space: Fire
 Butterfly Effect: Z
 Escape: Pause
 
 RUN:
+
 python main.py
 
 WHAT TO SEE:
+
 A simple shmup. When you kill an enemy, you gain a hurricane charge. After 4 successful kills, you can fire the Butterfly Effect,
 an unstoppable large whirlwind that kills everything in its path.
 
 ATTRIBUTION:
+
 Hillbilly Swing by Kevin MacLeod
 Link: https://incompetech.filmmusic.io/song/5705-hillbilly-swing
 License: http://creativecommons.org/licenses/by/4.0/
