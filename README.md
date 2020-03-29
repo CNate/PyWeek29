@@ -1,5 +1,5 @@
 # PyWeek29
-Theme: The butterfly Effect
+Theme: The butterfly effect
 
 DEPENDENCIES:
 
@@ -17,7 +17,7 @@ CONTROLS:
 
 RUN:
 
-  python main.py
+  python run_game.py
 
 WHAT TO SEE:
 
