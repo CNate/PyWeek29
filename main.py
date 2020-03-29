@@ -43,13 +43,18 @@ def processKeyEvent(keycode, state, inputs, isKeyDown=True):
     if keycode == _.K_RIGHT:
         inputs["right"] = isKeyDown
     if keycode == _.K_SPACE:
-        print("PEW PEW")
         inputs["fire"] = isKeyDown
 
 
 # TODO:Util module
 def loadImageExt(name):
     return _.image.load(f"./images/{name}.png").convert_alpha()
+
+
+def scaleImage(surface, multiplier):
+    rect = surface.get_rect()
+    w, h = int(rect.w * multiplier), int(rect.h * multiplier)
+    return _.transform.scale(surface, (w, h))
 
 
 # TODO:Util module
@@ -85,13 +90,12 @@ def initBackground(screen, x, y, x_offset=0, y_offset=0):
 
 
 class BackgroundLayer(_.sprite.Sprite):
-    background_filename = "back_cave_3"
+    filename = "back_cave_3"
 
     def __init__(self, screen, x, y, speed=.1):
         super().__init__()
 
-        self.image = _.transform.rotate(
-            loadImageExt(self.background_filename), 90)
+        self.image = _.transform.rotate(loadImageExt(self.filename), 90)
         self.x, self.y = x, y
         self.rect = self.image.get_rect()
 
@@ -100,13 +104,14 @@ class BackgroundLayer(_.sprite.Sprite):
 
 
 class Player(_.sprite.Sprite):
-    player_image_filename = "Spaceship004"
+    filename = "butterfly_01"
     bullets = []
+    powerup_count = 0
 
     def __init__(self, screen, speed=.5):
         super().__init__()
 
-        self.image = loadImageExt(self.player_image_filename)
+        self.image = scaleImage(loadImageExt(self.filename), 3.5)
         center_x, center_y = getDisplayCenter()
         self.rect = self.image.get_rect()
         self.x, self.y = center_x, center_y * 2 - 10
@@ -114,19 +119,27 @@ class Player(_.sprite.Sprite):
 
         self.speed = speed
         self.screen = screen
+        self.fire_cooldown = 0
+        self.screen_w = screen.get_width()
+        self.screen_h = screen.get_height()
 
     def update(self, delta_time, inputs):
-        if inputs["right"]:
+        center_x = self.rect.x + int(self.rect.w/2)
+        center_y = self.rect.y + int(self.rect.h/2)
+        if center_x < self.screen_w and inputs["right"]:
             self.rect.x += self.calculateSpeed(delta_time)
-        if inputs["left"]:
+        if center_x > 0 and inputs["left"]:
             self.rect.x -= self.calculateSpeed(delta_time)
-        if inputs["up"]:
+        if center_y > 30 and inputs["up"]:
             self.rect.y -= self.calculateSpeed(delta_time)
-        if inputs["down"]:
+        if center_y < self.screen_h and inputs["down"]:
             self.rect.y += self.calculateSpeed(delta_time)
-        if inputs["fire"] and len(self.bullets) < 4:
-            print("Added bullet")
+        if self.fire_cooldown < 0 and inputs["fire"] and len(self.bullets) < 4:
+            self.fire_cooldown = 275
+            self.powerup_count += 1
             self.bullets.append(Bullet(self.screen, self.rect.x, self.rect.y))
+
+        self.fire_cooldown -= delta_time
         self.screen.blit(self.image, self.rect)
         self.updateBullets(delta_time)
 
@@ -135,27 +148,77 @@ class Player(_.sprite.Sprite):
 
     def updateBullets(self, dt):
         for b in self.bullets:
-            if b.rect.y < -10:
+            if b.rect.y < -50:
                 self.bullets.remove(b)
                 continue
             b.update(dt)
 
 
 class Bullet(_.sprite.Sprite):
-    bullet_image_filename = "bullet"
+    filename = "bullet"
 
-    def __init__(self, screen, x, y, speed=.65):
+    def __init__(self, screen, x, y, speed=.5):
         super().__init__()
 
-        self.image = loadImageExt(self.bullet_image_filename)
+        self.image = scaleImage(loadImageExt(self.filename), 3.5)
         self.rect = self.image.get_rect()
         self.rect.x, self.rect.y = x, y
         self.screen = screen
         self.speed = speed
+        self.animation_cooldown = 0
 
     def update(self, dt):
         self.rect.y -= int(dt * self.speed)
+        if self.animation_cooldown < 0:
+            self.image = _.transform.flip(self.image, True, False)
+            self.animation_cooldown = 50
+        self.animation_cooldown -= dt
         self.screen.blit(self.image, self.rect)
+
+
+class PowerUp(_.sprite.Sprite):
+    filename = "powerup"
+
+    def __init__(self, screen, x, y):
+        self.original_image = scaleImage(loadImageExt(self.filename), 2)
+        self.image = self.original_image
+        self.rect = self.image.get_rect()
+        self.rect.x, self.rect.y = x, y
+        self.screen = screen
+        self.animation_cooldown = 0
+        self.angle = 0
+
+    def update(self, dt):
+        if self.animation_cooldown <= 0:
+            self.animation_cooldown = 100
+            self.angle += 45 % 360
+            self.image = _.transform.rotate(self.original_image, self.angle)
+            x, y = self.rect.center
+            self.rect = self.image.get_rect()
+            self.rect.center = (x, y)
+
+        self.animation_cooldown -= dt
+        self.screen.blit(self.image, self.rect)
+
+
+class UI():
+    powerups = []
+    score = 0
+    powerup_x, powerup_y = 20, 20
+
+    def __init__(self, screen):
+        self.screen = screen
+
+    def update(self, dt, count):
+        if len(self.powerups) < count:
+            self.powerups.append(PowerUp(self.screen,
+                                 self.powerup_x * count,
+                                 self.powerup_y))
+        self.renderPowerups(dt)
+
+    def renderPowerups(self, dt):
+        for pu in self.powerups:
+            pu.update(dt)
 
 
 def main():
@@ -168,11 +231,13 @@ def main():
     SCREEN = setDisplay()
     backgroundArray = initBackground(SCREEN, 0, 0)
     player = Player(SCREEN)
+    ui = UI(SCREEN)
 
     state = {
         "AppIsRunning": True,
         "IsPaused": False,
     }
+
     inputs = {
         "up": False,
         "down": False,
@@ -189,6 +254,7 @@ def main():
             SCREEN.fill((0, 0, 0))
             moveBackground(delta_time, backgroundArray)
             player.update(delta_time, inputs)
+            ui.update(delta_time, player.powerup_count)
 
         _.display.update()
 
